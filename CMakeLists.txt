@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.10.0)
 project(IOFilePatternBenchmarks
         DESCRIPTION "Benchmarks to evaulate differnt IO access patterns"
         LANGUAGES CXX
