@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="160" viewBox="0 0 700 160" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- producer -->
+  <rect x="20"   y="55" width="170" height="50" rx="8" fill="#2563eb"/>
+  <text x="105" y="84" fill="#ffffff" font-size="15" font-weight="600" text-anchor="middle">producer</text>
+
+  <!-- prodcons -->
+  <rect x="265" y="55" width="170" height="50" rx="8" fill="#16a34a"/>
+  <text x="350" y="84" fill="#ffffff" font-size="15" font-weight="600" text-anchor="middle">prodcons</text>
+
+  <!-- consumer -->
+  <rect x="510" y="55" width="170" height="50" rx="8" fill="#f97316"/>
+  <text x="595" y="84" fill="#ffffff" font-size="15" font-weight="600" text-anchor="middle">consumer</text>
+
+  <!-- arrow producer -> prodcons -->
+  <line x1="190" y1="80" x2="265" y2="80" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="227" y="40" fill="#475569" font-size="13" text-anchor="middle" font-style="italic">p0_%d.dat</text>
+
+  <!-- arrow prodcons -> consumer -->
+  <line x1="435" y1="80" x2="510" y2="80" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="472" y="40" fill="#475569" font-size="13" text-anchor="middle" font-style="italic">p1_%d.dat</text>
+</svg>

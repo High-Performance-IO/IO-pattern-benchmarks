@@ -27,9 +27,12 @@ FetchContent_MakeAvailable(args)
 
 add_executable(producer producer.cpp)
 add_executable(consumer consumer.cpp)
+add_executable(prodcons prodcons.cpp)
 
 target_include_directories(producer PRIVATE ${args_SOURCE_DIR} )
 target_include_directories(consumer PRIVATE ${args_SOURCE_DIR} )
+
+target_include_directories(prodcons PRIVATE ${args_SOURCE_DIR})
 
 
 

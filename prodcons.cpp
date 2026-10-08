@@ -12,14 +12,16 @@ int main(int argc, char **argv) {
 
     std::chrono::steady_clock::time_point absolute_begin = std::chrono::steady_clock::now();
 
-    std::string output_file_format = "file_%d.dat";
+    std::string input_file_format  = "in_%d.dat";
+    std::string output_file_format = "out_%d.dat";
     int window_size                = 1024;
     std::int64_t file_size         = 1024LL * 1024 * 1024; // 1GB file
     int file_count                 = 1;
     std::string pattern            = "streaming";
 
     args::ArgumentParser parser(
-        "producer: components of the IOFilePatternBenchmark suite that produces files",
+        "prodcons: IOFilePatternBenchmark pipeline stage that consumes files and produces "
+        "output files",
         "Developed by Marco Edoardo Santimaria\nmarcoedoardo.santimaria@unito.it - 2025 ");
     parser.LongSeparator(" ");
     parser.LongPrefix("--");
@@ -31,18 +33,25 @@ int main(int argc, char **argv) {
     args::ValueFlag<int> window_size_args(arguments, "Kilobytes", "Window size for IO operation",
                                           {'w', "window"});
 
+    args::ValueFlag<int> file_count_arg(arguments, "Count", "Number of files to process",
+                                        {'c', "count"});
+
+    args::ValueFlag<std::int64_t> file_size_arg(arguments, "Kilobytes",
+                                                "Size of each input file", {'s', "size"});
+
+    args::ValueFlag<std::string> input_file_format_arg(
+        arguments, "Filename",
+        "Input file name (optionally \"file format\" if flag -c > 1). Note: use %d to specify "
+        "where index of file should be placed. Default to " +
+            input_file_format,
+        {'i', "input"});
+
     args::ValueFlag<std::string> output_file_format_arg(
         arguments, "Filename",
         "Output file name (optionally \"file format\" if flag -c > 1). Note: use %d to specify "
         "where index of file should be placed. Default to " +
             output_file_format,
         {'o', "output"});
-
-    args::ValueFlag<int> file_count_arg(arguments, "Count", "Number of output files to produce",
-                                        {'c', "count"});
-
-    args::ValueFlag<std::int64_t> file_size_arg(arguments, "Kilobytes",
-                                                "Size of each produced file", {'s', "size"});
 
     args::ValueFlag<std::string> pattern_arg(
         arguments, "Pattern", "Write pattern: streaming or backward-seeks", {"pattern"});
@@ -58,16 +67,20 @@ int main(int argc, char **argv) {
         window_size = args::get(window_size_args);
     }
 
-    if (output_file_format_arg) {
-        output_file_format = args::get(output_file_format_arg);
-    }
-
     if (file_count_arg) {
         file_count = args::get(file_count_arg);
     }
 
     if (file_size_arg) {
         file_size = args::get(file_size_arg);
+    }
+
+    if (input_file_format_arg) {
+        input_file_format = args::get(input_file_format_arg);
+    }
+
+    if (output_file_format_arg) {
+        output_file_format = args::get(output_file_format_arg);
     }
 
     if (pattern_arg) {
@@ -82,6 +95,7 @@ int main(int argc, char **argv) {
 
     std::cout << "*========================================*" << std::endl
               << "| Test configuration:" << std::endl
+              << "| Input Format: \t" << input_file_format << std::endl
               << "| Output Format: \t" << output_file_format << std::endl
               << "| File count: \t\t" << file_count << std::endl
               << "| File size: \t\t" << file_size << std::endl
@@ -108,42 +122,50 @@ int main(int argc, char **argv) {
     }
 
     auto buffer = new char[window_size];
-    auto input  = fopen("/dev/urandom", "r");
-    fread(buffer, window_size, 1, input);
-    fclose(input);
 
     for (auto i = 0; i < file_count; i++) {
+        char input_file_name[PATH_MAX]{0};
         char output_file_name[PATH_MAX]{0};
 
+        sprintf(input_file_name, input_file_format.c_str(), i);
         sprintf(output_file_name, output_file_format.c_str(), i);
-        std::cout << "Writing to file: " << output_file_name;
+        std::cout << "Transforming file: " << input_file_name << " -> " << output_file_name;
 
         std::chrono::steady_clock::time_point test_start = std::chrono::steady_clock::now();
+        std::ifstream input_file(input_file_name, std::ios::binary);
         std::ofstream output_file(output_file_name, std::ios::binary);
 
+        std::int64_t read_operations = file_size / window_size;
+        std::int64_t extra_read_size = file_size % window_size;
+
         if (pattern == "streaming") {
-            std::int64_t write_operations = file_size / window_size;
-            std::int64_t extra_write_size = file_size % window_size;
-            for (std::int64_t operation_id = 0; operation_id < write_operations; operation_id++) {
+            for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
+                input_file.read(buffer, window_size);
                 output_file.write(buffer, window_size);
             }
-
-            if (extra_write_size) {
-                output_file.write(buffer, extra_write_size);
+            if (extra_read_size) {
+                input_file.read(buffer, extra_read_size);
+                output_file.write(buffer, extra_read_size);
             }
         } else {
             std::streamoff write_offset = static_cast<std::streamoff>(file_size);
             output_file.seekp(write_offset);
-            while (write_offset > 0) {
-                int write_size = static_cast<int>(
-                    std::min<std::streamoff>(window_size, write_offset));
-                write_offset -= write_size;
+            for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
+                input_file.read(buffer, window_size);
+                write_offset -= window_size;
                 output_file.seekp(write_offset);
-                output_file.write(buffer, write_size);
+                output_file.write(buffer, window_size);
+            }
+            if (extra_read_size) {
+                input_file.read(buffer, extra_read_size);
+                write_offset -= extra_read_size;
+                output_file.seekp(write_offset);
+                output_file.write(buffer, extra_read_size);
             }
         }
 
         output_file.close();
+        input_file.close();
         std::chrono::steady_clock::time_point test_end = std::chrono::steady_clock::now();
         std::cout
             << " - took: "
