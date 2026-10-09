@@ -1,0 +1,52 @@
+{
+  "name": "CAPIO",
+  "IO_Graph": [
+    {
+      "name": "producer",
+      "input_stream": [],
+      "output_stream": [
+        "file_*.dat",
+        "p0_*.dat"
+      ],
+      "streaming": [
+        {
+          "name": ["file_*.dat"],
+          "committed": "on_close"
+        },
+        {
+          "name": ["p0_*.dat"],
+          "committed": "on_close"
+        }
+      ]
+    },
+    {
+      "name": "prodcons",
+      "input_stream": [
+        "p0_*.dat"
+      ],
+      "output_stream": [
+        "p1_*.dat",
+        "mid_*_*.dat"
+      ],
+      "streaming": [
+        {
+          "name": ["p1_*.dat"],
+          "committed": "on_close"
+        },
+        {
+          "name": ["mid_*_*.dat"],
+          "committed": "on_close"
+        }
+      ]
+    },
+    {
+      "name": "consumer",
+      "input_stream": [
+        "file_*.dat",
+        "p1_*.dat",
+        "mid_*_*.dat"
+      ],
+      "output_stream": []
+    }
+  ]
+}

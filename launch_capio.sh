@@ -7,7 +7,16 @@ cd -- "$SCRIPT_DIR"
 CONFIG="${CONFIG:-$SCRIPT_DIR/CAPIO.json}"
 CAPIO_SERVER="${CAPIO_SERVER:-/home/marco/Desktop/capio/cmake-build-release/capio/server/capio_server}"
 CAPIO_PRELOAD="${CAPIO_PRELOAD:-/home/marco/Desktop/capio/cmake-build-release/capio/posix/libcapio_posix.so.1.0.0}"
-BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
+BUILD_DIR="${BUILD_DIR:-}"
+if [[ -z "$BUILD_DIR" ]]; then
+    for candidate in $(find "$SCRIPT_DIR" -maxdepth 1 -type d -iname '*build*'); do
+        if [[ -x "$candidate/producer" ]] || [[ -x "$candidate/consumer" ]] || [[ -x "$candidate/prodcons" ]]; then
+            BUILD_DIR="$candidate"
+            break
+        fi
+    done
+    BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
+fi
 CAPIO_DIR="${CAPIO_DIR:-$SCRIPT_DIR}"
 EXTRA_PRELOAD="${EXTRA_PRELOAD:-}"  # colon-separated extra libs prepended to LD_PRELOAD
 PATTERN="${PATTERN:-streaming}"
@@ -66,7 +75,7 @@ broadcast)
     run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
     pids=()
     for ((k = 0; k < N; k++)); do
-        run "consumer$k" "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT" &
+        run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT" &
         pids+=("$!")
     done
     for pid in "${pids[@]}"; do wait "$pid"; done
@@ -75,7 +84,7 @@ fanin)
     run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
     pids=()
     for ((k = 0; k < N; k++)); do
-        run "prodcons$k" "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat" &
+        run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat" &
         pids+=("$!")
     done
     for pid in "${pids[@]}"; do wait "$pid"; done
