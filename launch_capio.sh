@@ -53,6 +53,11 @@ cleanup() {
     trap - EXIT
     kill -0 "$server_pid" 2>/dev/null && kill -TERM "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
+    # CAPIO writes per-run artifacts; remove them so they don't accumulate.
+    rm -f "$SCRIPT_DIR"/files_location_*.txt || true
+    # CAPIO leaves /dev/shm segments + named semaphores on abnormal exit; leftover
+    # shm makes the NEXT server abort ("canary already exists") and wedges clients.
+    rm -f /dev/shm/CAPIO* /dev/shm/sem.CAPIO* 2>/dev/null || true
     exit "$status"
 }
 trap cleanup EXIT
@@ -61,36 +66,40 @@ kill -0 "$server_pid" 2>/dev/null || { printf 'CAPIO server exited during startu
 
 start_us=${EPOCHREALTIME/./}
 
+# Launch downstream stages first, the very first producer last, all in the background so CAPIO
+# streams data across the whole pipeline instead of running stages one after another.
+pids=()
+launch() {
+    "$@" &
+    pids+=("$!")
+}
+
 case "$TOPOLOGY" in
 chain)
-    run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
-    run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
     ;;
 pipeline)
-    run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
-    run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "p1_%d.dat"
-    run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p1_%d.dat"
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p1_%d.dat"
+    launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "p1_%d.dat"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
     ;;
 broadcast)
-    run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
-    pids=()
     for ((k = 0; k < N; k++)); do
-        run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT" &
-        pids+=("$!")
+        launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
     done
-    for pid in "${pids[@]}"; do wait "$pid"; done
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
     ;;
 fanin)
-    run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
-    pids=()
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --modules "$N" --output "mid_%d_%d.dat"
     for ((k = 0; k < N; k++)); do
-        run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat" &
-        pids+=("$!")
+        launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat"
     done
-    for pid in "${pids[@]}"; do wait "$pid"; done
-    run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --modules "$N" --output "mid_%d_%d.dat"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
     ;;
 esac
+
+for pid in "${pids[@]}"; do wait "$pid"; done
 
 end_us=${EPOCHREALTIME/./}
 elapsed_us=$((10#$end_us - 10#$start_us))

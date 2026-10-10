@@ -10,12 +10,12 @@
       ],
       "streaming": [
         {
-          "name": ["file_*.dat"],
-          "committed": "on_close"
-        },
-        {
-          "name": ["p0_*.dat"],
-          "committed": "on_close"
+          "name": [
+            "file_*.dat",
+            "p0_*.dat"
+          ],
+          "committed": "on_close",
+          "mode": "no_update"
         }
       ]
     },
@@ -30,12 +30,12 @@
       ],
       "streaming": [
         {
-          "name": ["p1_*.dat"],
-          "committed": "on_close"
-        },
-        {
-          "name": ["mid_*_*.dat"],
-          "committed": "on_close"
+          "name": [
+            "p1_*.dat",
+            "mid_*_*.dat"
+          ],
+          "committed": "on_close",
+          "mode" : "no_update"
         }
       ]
     },
