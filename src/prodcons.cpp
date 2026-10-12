@@ -8,6 +8,7 @@
 #include <linux/limits.h>
 
 #include "argparse.h"
+#include "djb2.h"
 
 int main(int argc, char **argv) {
 
@@ -19,6 +20,7 @@ int main(int argc, char **argv) {
     std::int64_t file_size         = 1024LL * 1024 * 1024; // 1GB file
     int file_count                 = 1;
     std::string pattern            = "streaming";
+    int compute                    = 0;
 
     cli::Parser parser(
         "prodcons: IOFilePatternBenchmark pipeline stage that consumes files and produces "
@@ -33,6 +35,8 @@ int main(int argc, char **argv) {
                "Output file name, optionally \"file format\" if flag -c > 1. Use %d for the file "
                "index");
     parser.add('\0', "pattern", pattern, "Write pattern: streaming or backward-seeks");
+    parser.add('\0', "compute", std::to_string(compute),
+               "Times to compute djb2 hash on each chunk read/written (0 = disabled)");
 
     if (!parser.parse(argc, argv)) {
         std::cout << (parser.help_requested() ? parser.help()
@@ -47,6 +51,12 @@ int main(int argc, char **argv) {
     input_file_format  = parser["input"].get<std::string>();
     output_file_format = parser["output"].get<std::string>();
     pattern            = parser["pattern"].get<std::string>();
+    compute            = parser["compute"].get<int>();
+
+    if (compute < 0) {
+        std::cout << "ERROR: --compute must be >= 0" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     if (pattern != "streaming" && pattern != "backward-seeks") {
         std::cout << "ERROR: Unknown pattern '" << pattern
@@ -62,6 +72,7 @@ int main(int argc, char **argv) {
               << "| File size: \t\t" << file_size << std::endl
               << "| Window size: \t\t" << window_size << std::endl
               << "| Pattern: \t\t" << pattern << std::endl
+              << "| Compute: \t\t" << compute << std::endl
               << "*========================================*" << std::endl
               << std::endl;
 
@@ -102,10 +113,12 @@ int main(int argc, char **argv) {
         if (pattern == "streaming") {
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);
+                djb2::hash_chunks(buffer, window_size, compute);
                 output_file.write(buffer, window_size);
             }
             if (extra_read_size) {
                 input_file.read(buffer, extra_read_size);
+                djb2::hash_chunks(buffer, extra_read_size, compute);
                 output_file.write(buffer, extra_read_size);
             }
         } else {
@@ -113,12 +126,14 @@ int main(int argc, char **argv) {
             output_file.seekp(write_offset);
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);
+                djb2::hash_chunks(buffer, window_size, compute);
                 write_offset -= window_size;
                 output_file.seekp(write_offset);
                 output_file.write(buffer, window_size);
             }
             if (extra_read_size) {
                 input_file.read(buffer, extra_read_size);
+                djb2::hash_chunks(buffer, extra_read_size, compute);
                 write_offset -= extra_read_size;
                 output_file.seekp(write_offset);
                 output_file.write(buffer, extra_read_size);

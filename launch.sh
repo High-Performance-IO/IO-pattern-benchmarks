@@ -25,6 +25,7 @@ FILE_COUNT="${FILE_COUNT:-1}"
 OUTPUT_FILE_FORMAT="${OUTPUT_FILE_FORMAT:-file_%d.dat}"
 TOPOLOGY="${TOPOLOGY:-chain}"
 N="${N:-2}"
+COMPUTE="${COMPUTE:-0}"   # djb2 hash passes per read/write chunk
 
 case "$TOPOLOGY" in
 chain|pipeline|broadcast|fanin) : ;;
@@ -56,36 +57,39 @@ cleanup_files
 # Interception applies only to the benchmark binaries, run in a subshell.
 # File removal and everything else happens here, in the parent (unintercepted).
 (
-    [[ -z "$EXTRA_PRELOAD" ]] || export LD_PRELOAD="$EXTRA_PRELOAD"
+    # Preload only the benchmark binaries, never the shell or its cleanup `rm`.
+    # EXTRA_PRELOAD is a colon-separated list (may be empty); we scope it to a
+    # single command via `env` instead of exporting to the whole subshell.
+    run() { env ${EXTRA_PRELOAD:+LD_PRELOAD="$EXTRA_PRELOAD"} "$@"; }
 
     case "$TOPOLOGY" in
     chain)
-        "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
-        "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+        run "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
+        run "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
         ;;
     pipeline)
-        "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
-        "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "p1_%d.dat"
-        "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p1_%d.dat"
+        run "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p0_%d.dat"
+        run "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --input "p0_%d.dat" --output "p1_%d.dat"
+        run "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p1_%d.dat"
         ;;
     broadcast)
-        "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+        run "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
         pids=()
         for ((k = 0; k < N; k++)); do
-            "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT" &
+            run "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT" &
             pids+=("$!")
         done
         for pid in "${pids[@]}"; do wait "$pid"; done
         ;;
     fanin)
-        "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
+        run "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p0_%d.dat"
         pids=()
         for ((k = 0; k < N; k++)); do
-            "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat" &
+            run "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --input "p0_%d.dat" --output "mid_${k}_%d.dat" &
             pids+=("$!")
         done
         for pid in "${pids[@]}"; do wait "$pid"; done
-        "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --modules "$N" --output "mid_%d_%d.dat"
+        run "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --modules "$N" --output "mid_%d_%d.dat"
         ;;
     esac
 )

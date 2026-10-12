@@ -7,6 +7,7 @@
 #include <string>
 
 #include "argparse.h"
+#include "djb2.h"
 
 static void fill_format(std::string &fmt, std::int64_t module, std::int64_t file) {
     auto first = fmt.find("%d");
@@ -28,6 +29,7 @@ int main(int argc, char **argv) {
     std::int64_t file_size        = 1024LL * 1024 * 1024; // 1GB file
     int file_count                = 1;
     int modules                   = 1;
+    int compute                   = 0;
 
     cli::Parser parser(
         "consumer: components of the IOFilePatternBenchmark suite that consumes files");
@@ -39,6 +41,8 @@ int main(int argc, char **argv) {
     parser.add('s', "size", std::to_string(file_size), "Size of each input file [KB]");
     parser.add('m', "modules", std::to_string(modules),
                "Number of module sub-streams (fanin), 1 if unset");
+    parser.add('\0', "compute", std::to_string(compute),
+               "Times to compute djb2 hash on each read chunk (0 = disabled)");
 
     if (!parser.parse(argc, argv)) {
         std::cout << (parser.help_requested() ? parser.help()
@@ -55,6 +59,11 @@ int main(int argc, char **argv) {
     if (modules < 1) {
         modules = 1;
     }
+    compute = parser["compute"].get<int>();
+    if (compute < 0) {
+        std::cout << "ERROR: --compute must be >= 0" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     std::cout << "*========================================*" << std::endl
               << "| Test configuration:" << std::endl
@@ -63,6 +72,7 @@ int main(int argc, char **argv) {
               << "| File size: \t\t" << file_size << std::endl
               << "| Window size: \t\t" << window_size << std::endl
               << "| Modules: \t\t" << modules << std::endl
+              << "| Compute: \t\t" << compute << std::endl
               << "*========================================*" << std::endl
               << std::endl;
 
@@ -91,10 +101,12 @@ int main(int argc, char **argv) {
             std::int64_t extra_read_size = file_size % window_size;
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 output_file.read(buffer, window_size);
+                djb2::hash_chunks(buffer, window_size, compute);
             }
 
             if (extra_read_size) {
                 output_file.read(buffer, extra_read_size);
+                djb2::hash_chunks(buffer, extra_read_size, compute);
             }
 
             output_file.close();

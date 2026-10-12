@@ -26,6 +26,7 @@ FILE_COUNT="${FILE_COUNT:-1}"
 OUTPUT_FILE_FORMAT="${OUTPUT_FILE_FORMAT:-file_%d.dat}"
 TOPOLOGY="${TOPOLOGY:-chain}"
 N="${N:-2}"
+COMPUTE="${COMPUTE:-0}"   # djb2 hash passes per read/write chunk
 
 case "$TOPOLOGY" in
 chain|pipeline|broadcast|fanin) : ;;
@@ -76,26 +77,26 @@ launch() {
 
 case "$TOPOLOGY" in
 chain)
-    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
-    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
     ;;
 pipeline)
-    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p1_%d.dat"
-    launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "p1_%d.dat"
-    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p1_%d.dat"
+    launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --input "p0_%d.dat" --output "p1_%d.dat"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p0_%d.dat"
     ;;
 broadcast)
     for ((k = 0; k < N; k++)); do
-        launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+        launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
     done
-    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "$OUTPUT_FILE_FORMAT"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "$OUTPUT_FILE_FORMAT"
     ;;
 fanin)
-    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --modules "$N" --output "mid_%d_%d.dat"
+    launch run consumer "$BUILD_DIR/consumer" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --modules "$N" --output "mid_%d_%d.dat"
     for ((k = 0; k < N; k++)); do
-        launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --input "p0_%d.dat" --output "mid_${k}_%d.dat"
+        launch run prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --input "p0_%d.dat" --output "mid_${k}_%d.dat"
     done
-    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --output "p0_%d.dat"
+    launch run producer "$BUILD_DIR/producer" --pattern "$PATTERN" --window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE" --output "p0_%d.dat"
     ;;
 esac
 

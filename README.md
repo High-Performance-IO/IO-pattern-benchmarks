@@ -17,6 +17,8 @@ Three executables are built under `build/`:
 - **`consumer`** — reads files. With `--modules N` it reads a two-index file format `(module,file)`.
 - **`prodcons`** — reads files and writes output files. Takes `--window`, `--count`, `--size`, `--input`, `--output`, `--pattern`.
 
+All three accept `--compute <N>` (where `N >= 0`): the djb2 hash is computed `N` times on every chunk read or written. A value of `0` (the default) skips hashing entirely.
+
 ## Producer write patterns
 
 Streaming is the default and writes each file sequentially without backward seeks:
@@ -47,6 +49,7 @@ Backward seeks write the same number of bytes by seeking from the file end towar
 | `FILE_SIZE` | `1073741824` | Size of each file in bytes. |
 | `FILE_COUNT` | `1` | Number of files produced and consumed. |
 | `OUTPUT_FILE_FORMAT` | `file_%d.dat` | printf-style file-name template for the shared stream (`chain`, `broadcast`). |
+| `COMPUTE` | `0` | Number of times the djb2 hash is computed on each chunk read/written. `0` disables hashing. |
 
 Topologies that pin stream names ignore `OUTPUT_FILE_FORMAT`:
 `pipeline` and `fanin` use `p0_%d.dat` / `p1_%d.dat`, and `fanin` uses `mid_%d_%d.dat`.

@@ -8,6 +8,7 @@
 #include <linux/limits.h>
 
 #include "argparse.h"
+#include "djb2.h"
 
 int main(int argc, char **argv) {
 
@@ -18,6 +19,7 @@ int main(int argc, char **argv) {
     std::int64_t file_size         = 1024LL * 1024 * 1024; // 1GB file
     int file_count                 = 1;
     std::string pattern            = "streaming";
+    int compute                    = 0;
 
     cli::Parser parser(
         "producer: components of the IOFilePatternBenchmark suite that produces files");
@@ -28,6 +30,8 @@ int main(int argc, char **argv) {
     parser.add('c', "count", std::to_string(file_count), "Number of output files to produce");
     parser.add('s', "size", std::to_string(file_size), "Size of each produced file [KB]");
     parser.add('\0', "pattern", pattern, "Write pattern: streaming or backward-seeks");
+    parser.add('\0', "compute", std::to_string(compute),
+               "Times to compute djb2 hash on each written chunk (0 = disabled)");
 
     if (!parser.parse(argc, argv)) {
         std::cout << (parser.help_requested() ? parser.help()
@@ -41,6 +45,12 @@ int main(int argc, char **argv) {
     file_count         = parser["count"].get<int>();
     file_size          = parser["size"].get<std::int64_t>();
     pattern            = parser["pattern"].get<std::string>();
+    compute            = parser["compute"].get<int>();
+
+    if (compute < 0) {
+        std::cout << "ERROR: --compute must be >= 0" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     if (pattern != "streaming" && pattern != "backward-seeks") {
         std::cout << "ERROR: Unknown pattern '" << pattern
@@ -55,6 +65,7 @@ int main(int argc, char **argv) {
               << "| File size: \t\t" << file_size << std::endl
               << "| Window size: \t\t" << window_size << std::endl
               << "| Pattern: \t\t" << pattern << std::endl
+              << "| Compute: \t\t" << compute << std::endl
               << "*========================================*" << std::endl
               << std::endl;
 
@@ -93,10 +104,12 @@ int main(int argc, char **argv) {
             std::int64_t write_operations = file_size / window_size;
             std::int64_t extra_write_size = file_size % window_size;
             for (std::int64_t operation_id = 0; operation_id < write_operations; operation_id++) {
+                djb2::hash_chunks(buffer, window_size, compute);
                 output_file.write(buffer, window_size);
             }
 
             if (extra_write_size) {
+                djb2::hash_chunks(buffer, extra_write_size, compute);
                 output_file.write(buffer, extra_write_size);
             }
         } else {
@@ -107,6 +120,7 @@ int main(int argc, char **argv) {
                     static_cast<int>(std::min<std::streamoff>(window_size, write_offset));
                 write_offset -= write_size;
                 output_file.seekp(write_offset);
+                djb2::hash_chunks(buffer, write_size, compute);
                 output_file.write(buffer, write_size);
             }
         }
