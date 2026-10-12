@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <linux/limits.h>
+#include <unistd.h>
 
 #include "argparse.h"
 #include "djb2.h"
@@ -142,6 +144,18 @@ int main(int argc, char **argv) {
 
         output_file.close();
         input_file.close();
+
+        // Flush the output file to disk AND evict its pages so the downstream
+        // consumer's read (pipeline/fanin topologies) genuinely touches storage
+        // instead of the warm page cache, keeping the plain sequential run a
+        // fair baseline vs CAPIO.
+        int fd = open(output_file_name, O_WRONLY);
+        if (fd >= 0) {
+            fsync(fd);                                    // make pages clean
+            posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);  // then evict them
+            close(fd);
+        }
+
         std::chrono::steady_clock::time_point test_end = std::chrono::steady_clock::now();
         std::cout
             << " - took: "
