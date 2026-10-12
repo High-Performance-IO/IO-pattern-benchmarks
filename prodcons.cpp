@@ -1,12 +1,12 @@
-#include <args.hxx>
+#include "argparse.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <linux/limits.h>
 #include <limits>
+#include <linux/limits.h>
 
 int main(int argc, char **argv) {
 
@@ -19,73 +19,33 @@ int main(int argc, char **argv) {
     int file_count                 = 1;
     std::string pattern            = "streaming";
 
-    args::ArgumentParser parser(
+    cli::Parser parser(
         "prodcons: IOFilePatternBenchmark pipeline stage that consumes files and produces "
-        "output files",
-        "Developed by Marco Edoardo Santimaria\nmarcoedoardo.santimaria@unito.it - 2025 ");
-    parser.LongSeparator(" ");
-    parser.LongPrefix("--");
-    parser.ShortPrefix("-");
+        "output files");
+    parser.add('w', "window", std::to_string(window_size), "Window size for IO operation [KB]");
+    parser.add('c', "count", std::to_string(file_count), "Number of files to process");
+    parser.add('s', "size", std::to_string(file_size), "Size of each input file [KB]");
+    parser.add('i', "input", input_file_format,
+               "Input file name, optionally \"file format\" if flag -c > 1. Use %d for the file "
+               "index");
+    parser.add('o', "output", output_file_format,
+               "Output file name, optionally \"file format\" if flag -c > 1. Use %d for the file "
+               "index");
+    parser.add('\0', "pattern", pattern, "Write pattern: streaming or backward-seeks");
 
-    args::Group arguments(parser, "Arguments");
-    args::HelpFlag help(arguments, "", "Display this help menu", {'h', "help"});
-
-    args::ValueFlag<int> window_size_args(arguments, "Kilobytes", "Window size for IO operation",
-                                          {'w', "window"});
-
-    args::ValueFlag<int> file_count_arg(arguments, "Count", "Number of files to process",
-                                        {'c', "count"});
-
-    args::ValueFlag<std::int64_t> file_size_arg(arguments, "Kilobytes",
-                                                "Size of each input file", {'s', "size"});
-
-    args::ValueFlag<std::string> input_file_format_arg(
-        arguments, "Filename",
-        "Input file name (optionally \"file format\" if flag -c > 1). Note: use %d to specify "
-        "where index of file should be placed. Default to " +
-            input_file_format,
-        {'i', "input"});
-
-    args::ValueFlag<std::string> output_file_format_arg(
-        arguments, "Filename",
-        "Output file name (optionally \"file format\" if flag -c > 1). Note: use %d to specify "
-        "where index of file should be placed. Default to " +
-            output_file_format,
-        {'o', "output"});
-
-    args::ValueFlag<std::string> pattern_arg(
-        arguments, "Pattern", "Write pattern: streaming or backward-seeks", {"pattern"});
-
-    try {
-        parser.ParseCLI(argc, argv);
-    } catch (args::Help &e) {
-        std::cout << "ERROR: " << e.what() << std::endl << parser << std::endl;
-        exit(EXIT_FAILURE);
+    if (!parser.parse(argc, argv)) {
+        std::cout << (parser.help_requested() ? parser.help()
+                                              : "ERROR: invalid arguments\n" + parser.help())
+                  << std::endl;
+        return EXIT_FAILURE;
     }
 
-    if (window_size_args) {
-        window_size = args::get(window_size_args);
-    }
-
-    if (file_count_arg) {
-        file_count = args::get(file_count_arg);
-    }
-
-    if (file_size_arg) {
-        file_size = args::get(file_size_arg);
-    }
-
-    if (input_file_format_arg) {
-        input_file_format = args::get(input_file_format_arg);
-    }
-
-    if (output_file_format_arg) {
-        output_file_format = args::get(output_file_format_arg);
-    }
-
-    if (pattern_arg) {
-        pattern = args::get(pattern_arg);
-    }
+    window_size        = parser["window"].get<int>();
+    file_count         = parser["count"].get<int>();
+    file_size          = parser["size"].get<std::int64_t>();
+    input_file_format  = parser["input"].get<std::string>();
+    output_file_format = parser["output"].get<std::string>();
+    pattern            = parser["pattern"].get<std::string>();
 
     if (pattern != "streaming" && pattern != "backward-seeks") {
         std::cout << "ERROR: Unknown pattern '" << pattern
@@ -114,9 +74,9 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    if (pattern == "backward-seeks" && static_cast<std::uintmax_t>(file_size) >
-                                           static_cast<std::uintmax_t>(
-                                               std::numeric_limits<std::streamoff>::max())) {
+    if (pattern == "backward-seeks" &&
+        static_cast<std::uintmax_t>(file_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::streamoff>::max())) {
         std::cout << "ERROR: File size exceeds the supported seek range" << std::endl;
         exit(EXIT_FAILURE);
     }
@@ -148,7 +108,7 @@ int main(int argc, char **argv) {
                 output_file.write(buffer, extra_read_size);
             }
         } else {
-            std::streamoff write_offset = static_cast<std::streamoff>(file_size);
+            auto write_offset = static_cast<std::streamoff>(file_size);
             output_file.seekp(write_offset);
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);

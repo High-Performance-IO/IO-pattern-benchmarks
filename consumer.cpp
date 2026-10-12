@@ -1,4 +1,4 @@
-#include <args.hxx>
+#include "argparse.h"
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -7,9 +7,6 @@
 #include <linux/limits.h>
 #include <string>
 
-// Replaces the first %d with `module` and the second %d with `file` in a copy
-// of `format`. If only one %d exists (or none), it is filled with `module`
-// (0 when modules==1 so single-%d behaviour is preserved).
 static void fill_format(std::string &fmt, std::int64_t module, std::int64_t file) {
     auto first = fmt.find("%d");
     if (first != std::string::npos) {
@@ -31,64 +28,31 @@ int main(int argc, char **argv) {
     int file_count                = 1;
     int modules                   = 1;
 
-    args::ArgumentParser parser(
-        "consumer: components of the IOFilePatternBenchmark suite that produces files",
-        "Developed by Marco Edoardo Santimaria\nmarcoedoardo.santimaria@unito.it - 2025 ");
-    parser.LongSeparator(" ");
-    parser.LongPrefix("--");
-    parser.ShortPrefix("-");
+    cli::Parser parser(
+        "consumer: components of the IOFilePatternBenchmark suite that consumes files");
+    parser.add('w', "window", std::to_string(window_size), "Window size for IO operation [KB]");
+    parser.add('o', "output", input_file_format,
+               "Input file name, optionally \"file format\" if flag -c > 1. Use %d for the file "
+               "index");
+    parser.add('c', "count", std::to_string(file_count), "Number of input files to consume");
+    parser.add('s', "size", std::to_string(file_size), "Size of each input file [KB]");
+    parser.add('m', "modules", std::to_string(modules),
+               "Number of module sub-streams (fanin), 1 if unset");
 
-    args::Group arguments(parser, "Arguments");
-    args::HelpFlag help(arguments, "", "Display this help menu", {'h', "help"});
-
-    args::ValueFlag<int> window_size_args(arguments, "Kilobytes", "Window size for IO operation",
-                                          {'w', "window"});
-
-    args::ValueFlag<std::string> input_file_format_arg(
-        arguments, "Filename",
-        "Input file name (optionally \"file format\" if flag -c > 1). Note: use %d to specify "
-        "where index of file should be placed. Default to " +
-            input_file_format,
-        {'o', "output"});
-
-    args::ValueFlag<int> file_count_arg(arguments, "Count", "Number of output files to produce",
-                                        {'c', "count"});
-
-    args::ValueFlag<std::int64_t> file_size_arg(arguments, "Kilobytes",
-                                                "Size of each produced file", {'s', "size"});
-
-    args::ValueFlag<int> modules_arg(arguments, "Modules",
-                                     "Number of module sub-streams (fanin). Enabled only if > 1",
-                                     {'m', "modules"});
-
-    try {
-        parser.ParseCLI(argc, argv);
-    } catch (args::Help &e) {
-        std::cout << "ERROR: " << e.what() << std::endl << parser << std::endl;
-        exit(EXIT_FAILURE);
+    if (!parser.parse(argc, argv)) {
+        std::cout << (parser.help_requested() ? parser.help()
+                                              : "ERROR: invalid arguments\n" + parser.help())
+                  << std::endl;
+        return EXIT_FAILURE;
     }
 
-    if (window_size_args) {
-        window_size = args::get(window_size_args);
-    }
-
-    if (input_file_format_arg) {
-        input_file_format = args::get(input_file_format_arg);
-    }
-
-    if (file_count_arg) {
-        file_count = args::get(file_count_arg);
-    }
-
-    if (file_size_arg) {
-        file_size = args::get(file_size_arg);
-    }
-
-    if (modules_arg) {
-        modules = args::get(modules_arg);
-        if (modules < 1) {
-            modules = 1;
-        }
+    window_size       = parser["window"].get<int>();
+    input_file_format = parser["output"].get<std::string>();
+    file_count        = parser["count"].get<int>();
+    file_size         = parser["size"].get<std::int64_t>();
+    modules           = parser["modules"].get<int>();
+    if (modules < 1) {
+        modules = 1;
     }
 
     std::cout << "*========================================*" << std::endl
