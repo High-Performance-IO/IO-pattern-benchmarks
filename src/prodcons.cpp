@@ -1,4 +1,3 @@
-#include "argparse.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -7,6 +6,8 @@
 #include <iostream>
 #include <limits>
 #include <linux/limits.h>
+
+#include "argparse.h"
 
 int main(int argc, char **argv) {
 

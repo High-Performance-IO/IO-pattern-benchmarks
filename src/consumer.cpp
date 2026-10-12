@@ -1,4 +1,3 @@
-#include "argparse.h"
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -6,6 +5,8 @@
 #include <iostream>
 #include <linux/limits.h>
 #include <string>
+
+#include "argparse.h"
 
 static void fill_format(std::string &fmt, std::int64_t module, std::int64_t file) {
     auto first = fmt.find("%d");
