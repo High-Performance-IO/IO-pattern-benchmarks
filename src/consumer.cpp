@@ -97,8 +97,10 @@ int main(int argc, char **argv) {
             std::chrono::steady_clock::time_point test_start = std::chrono::steady_clock::now();
             std::ifstream output_file(name, std::ios::binary);
 
-            std::int64_t read_operations = file_size / window_size;
-            std::int64_t extra_read_size = file_size % window_size;
+            // Read exactly what the producer wrote, not the configured file_size.
+            std::int64_t actual_size = std::filesystem::file_size(name);
+            std::int64_t read_operations = actual_size / window_size;
+            std::int64_t extra_read_size = actual_size % window_size;
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 output_file.read(buffer, window_size);
                 djb2::hash_chunks(buffer, window_size, compute);

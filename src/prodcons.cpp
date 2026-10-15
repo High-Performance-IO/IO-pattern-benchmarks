@@ -109,8 +109,10 @@ int main(int argc, char **argv) {
         std::ifstream input_file(input_file_name, std::ios::binary);
         std::ofstream output_file(output_file_name, std::ios::binary);
 
-        std::int64_t read_operations = file_size / window_size;
-        std::int64_t extra_read_size = file_size % window_size;
+        // Match the output to the size of the actual input, not the configured file_size.
+        std::int64_t actual_size = std::filesystem::file_size(input_file_name);
+        std::int64_t read_operations = actual_size / window_size;
+        std::int64_t extra_read_size = actual_size % window_size;
 
         if (pattern == "streaming") {
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
@@ -124,7 +126,7 @@ int main(int argc, char **argv) {
                 output_file.write(buffer, extra_read_size);
             }
         } else {
-            auto write_offset = static_cast<std::streamoff>(file_size);
+            auto write_offset = static_cast<std::streamoff>(actual_size);
             output_file.seekp(write_offset);
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);
