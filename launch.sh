@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-start_us=${EPOCHREALTIME/./}
+# Microseconds since the epoch. EPOCHREALTIME needs bash 5; RHEL 8 has 4.4,
+# so fall back to GNU date there.
+now_us() {
+    if [[ -n ${EPOCHREALTIME:-} ]]; then echo "${EPOCHREALTIME/./}"; else date +%s%6N; fi
+}
+
+start_us=$(now_us)
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -94,6 +100,6 @@ cleanup_files
     esac
 )
 
-end_us=${EPOCHREALTIME/./}
+end_us=$(now_us)
 elapsed_us=$((10#$end_us - 10#$start_us))
 printf 'End-to-end execution time: %d.%03d ms\n' "$((elapsed_us / 1000))" "$((elapsed_us % 1000))"
