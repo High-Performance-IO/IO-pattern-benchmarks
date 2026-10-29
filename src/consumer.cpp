@@ -1,6 +1,5 @@
 #include <chrono>
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <linux/limits.h>
@@ -88,6 +87,12 @@ int main(int argc, char **argv) {
 
     auto buffer = new char[window_size];
 
+    // Every file is exactly --size bytes: the size is never taken from stat(), as a file that is
+    // still being streamed by its producer (e.g. under CAPIO) reports only what is written so far.
+    std::int64_t read_operations = file_size / window_size;
+    std::int64_t extra_read_size = file_size % window_size;
+    std::int64_t bytes_read      = 0;
+
     for (int module = 0; module < modules; module++) {
         for (auto i = 0; i < file_count; i++) {
             std::string name = input_file_format;
@@ -95,23 +100,34 @@ int main(int argc, char **argv) {
             std::cout << "Reading from file: " << name;
 
             std::chrono::steady_clock::time_point test_start = std::chrono::steady_clock::now();
-            std::ifstream output_file(name, std::ios::binary);
+            std::ifstream input_file(name, std::ios::binary);
+            if (!input_file) {
+                std::cout << std::endl << "ERROR: cannot open " << name << std::endl;
+                exit(EXIT_FAILURE);
+            }
 
-            // Read exactly what the producer wrote, not the configured file_size.
-            std::int64_t actual_size = std::filesystem::file_size(name);
-            std::int64_t read_operations = actual_size / window_size;
-            std::int64_t extra_read_size = actual_size % window_size;
+            std::int64_t file_bytes = 0;
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
-                output_file.read(buffer, window_size);
+                input_file.read(buffer, window_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, window_size, compute);
             }
 
             if (extra_read_size) {
-                output_file.read(buffer, extra_read_size);
+                input_file.read(buffer, extra_read_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, extra_read_size, compute);
             }
 
-            output_file.close();
+            input_file.close();
+            if (file_bytes != file_size) {
+                std::cout << std::endl
+                          << "ERROR: short read on " << name << ": " << file_bytes << " of "
+                          << file_size << " bytes" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            bytes_read += file_bytes;
+
             std::chrono::steady_clock::time_point test_end = std::chrono::steady_clock::now();
             std::cout << " - took: "
                       << std::chrono::duration_cast<std::chrono::microseconds>(test_end -
@@ -122,6 +138,8 @@ int main(int argc, char **argv) {
     }
 
     delete[] buffer;
+
+    std::cout << "IO bytes: read=" << bytes_read << " written=0" << std::endl;
 
     std::chrono::steady_clock::time_point absolute_end = std::chrono::steady_clock::now();
     std::cout << "Execution elapsed time: "

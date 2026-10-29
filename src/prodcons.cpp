@@ -2,7 +2,6 @@
 #include <chrono>
 #include <cstdint>
 #include <fcntl.h>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -97,6 +96,14 @@ int main(int argc, char **argv) {
 
     auto buffer = new char[window_size];
 
+    // Every input file is exactly --size bytes and every output is written at that size: the size
+    // is never taken from stat(), as an input that is still being streamed by its producer (e.g.
+    // under CAPIO) reports only what is written so far.
+    std::int64_t read_operations = file_size / window_size;
+    std::int64_t extra_read_size = file_size % window_size;
+    std::int64_t bytes_read      = 0;
+    std::int64_t bytes_written   = 0;
+
     for (auto i = 0; i < file_count; i++) {
         char input_file_name[PATH_MAX]{0};
         char output_file_name[PATH_MAX]{0};
@@ -107,29 +114,32 @@ int main(int argc, char **argv) {
 
         std::chrono::steady_clock::time_point test_start = std::chrono::steady_clock::now();
         std::ifstream input_file(input_file_name, std::ios::binary);
+        if (!input_file) {
+            std::cout << std::endl << "ERROR: cannot open " << input_file_name << std::endl;
+            exit(EXIT_FAILURE);
+        }
         std::ofstream output_file(output_file_name, std::ios::binary);
 
-        // Match the output to the size of the actual input, not the configured file_size.
-        std::int64_t actual_size = std::filesystem::file_size(input_file_name);
-        std::int64_t read_operations = actual_size / window_size;
-        std::int64_t extra_read_size = actual_size % window_size;
-
+        std::int64_t file_bytes = 0;
         if (pattern == "streaming") {
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, window_size, compute);
                 output_file.write(buffer, window_size);
             }
             if (extra_read_size) {
                 input_file.read(buffer, extra_read_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, extra_read_size, compute);
                 output_file.write(buffer, extra_read_size);
             }
         } else {
-            auto write_offset = static_cast<std::streamoff>(actual_size);
+            auto write_offset = static_cast<std::streamoff>(file_size);
             output_file.seekp(write_offset);
             for (std::int64_t operation_id = 0; operation_id < read_operations; operation_id++) {
                 input_file.read(buffer, window_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, window_size, compute);
                 write_offset -= window_size;
                 output_file.seekp(write_offset);
@@ -137,12 +147,27 @@ int main(int argc, char **argv) {
             }
             if (extra_read_size) {
                 input_file.read(buffer, extra_read_size);
+                file_bytes += input_file.gcount();
                 djb2::hash_chunks(buffer, extra_read_size, compute);
                 write_offset -= extra_read_size;
                 output_file.seekp(write_offset);
                 output_file.write(buffer, extra_read_size);
             }
         }
+
+        if (file_bytes != file_size) {
+            std::cout << std::endl
+                      << "ERROR: short read on " << input_file_name << ": " << file_bytes
+                      << " of " << file_size << " bytes" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        if (!output_file) {
+            std::cout << std::endl
+                      << "ERROR: write to " << output_file_name << " failed" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        bytes_read += file_bytes;
+        bytes_written += file_size;
 
         output_file.close();
         input_file.close();
@@ -166,6 +191,8 @@ int main(int argc, char **argv) {
     }
 
     delete[] buffer;
+
+    std::cout << "IO bytes: read=" << bytes_read << " written=" << bytes_written << std::endl;
 
     std::chrono::steady_clock::time_point absolute_end = std::chrono::steady_clock::now();
     std::cout << "Execution elapsed time: "

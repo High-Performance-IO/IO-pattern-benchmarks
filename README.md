@@ -19,6 +19,8 @@ Three executables are built under `build/`:
 
 All three accept `--compute <N>` (where `N >= 0`): the djb2 hash is computed `N` times on every chunk read or written. A value of `0` (the default) skips hashing entirely.
 
+Every file is exactly `--size` bytes, and every stage must be given the same `--size`. No binary ever takes a file's size from `stat()`: under CAPIO, a file that is still being streamed reports only the bytes written so far. A read that ends before `--size` bytes is an error (exit 1). Before exiting, each binary prints its total traffic as `IO bytes: read=<n> written=<n>`, so a driver can check that the run moved all its data.
+
 ## Producer write patterns
 
 Streaming is the default and writes each file sequentially without backward seeks:

@@ -2,7 +2,6 @@
 #include <chrono>
 #include <cstdint>
 #include <fcntl.h>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -93,6 +92,7 @@ int main(int argc, char **argv) {
     fread(buffer, window_size, 1, input);
     fclose(input);
 
+    std::int64_t bytes_written = 0;
     for (auto i = 0; i < file_count; i++) {
         char output_file_name[PATH_MAX]{0};
 
@@ -127,6 +127,11 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (!output_file) {
+            std::cout << std::endl
+                      << "ERROR: write to " << output_file_name << " failed" << std::endl;
+            exit(EXIT_FAILURE);
+        }
         output_file.close();
 
         // Flush the written file to disk AND evict its pages so the consumer's
@@ -139,6 +144,8 @@ int main(int argc, char **argv) {
             close(fd);
         }
 
+        bytes_written += file_size;
+
         std::chrono::steady_clock::time_point test_end = std::chrono::steady_clock::now();
         std::cout
             << " - took: "
@@ -147,6 +154,8 @@ int main(int argc, char **argv) {
     }
 
     delete[] buffer;
+
+    std::cout << "IO bytes: read=0 written=" << bytes_written << std::endl;
 
     std::chrono::steady_clock::time_point absolute_end = std::chrono::steady_clock::now();
     std::cout << "Execution elapsed time: "
