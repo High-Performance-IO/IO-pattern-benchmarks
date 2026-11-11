@@ -7,20 +7,18 @@
 #   broadcast  producer, N consumer
 #   fanin      producer, N prodcons, consumer
 #
-# Stages start upstream first; each downstream one once CAPIO has registered its
-# inputs (see wait_registered), so no consumer looks up a file before it exists.
+# Once the server is up, every application is launched at once, from the end of the
+# pipeline back to the original producer, and CAPIO discovers the files itself.
 #
 # Prints "End-to-end execution time: <ms> ms": the binaries' own execution, from the
 # first one starting to the last one ending, each timed right around the binary.
-# Starting the server is not included; the wall time, which includes waiting for
-# registrations, is printed apart.
+# Starting the server is not included; the wall time is printed apart.
 #
 # Environment:
 #   CAPIO_SERVER CAPIO_PRELOAD CONFIG CAPIO_DIR BUILD_DIR
 #   CAPIO_BACKEND  server backend (default: the server's own)
 #   EXTRA_PRELOAD  colon-separated libs prepended to LD_PRELOAD of the binaries
 #   SERVER_WAIT    seconds to wait for the server to start (default 120)
-#   REGISTER_WAIT  seconds a stage waits for its inputs to be registered (default 10)
 #   TOPOLOGY N PATTERN WINDOW_SIZE FILE_SIZE FILE_COUNT COMPUTE OUTPUT_FILE_FORMAT
 set -euo pipefail
 
@@ -75,7 +73,7 @@ done
 clean_shm() { rm -f /dev/shm/CAPIO* /dev/shm/sem.CAPIO* 2>/dev/null || true; }
 
 cd -- "$CAPIO_DIR"
-rm -f files_location_*.txt
+rm -f files_location_*.txt # written by CAPIO builds before HomeNodeService (#277)
 clean_shm
 
 RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/launch_capio.XXXXXX") # server log and binary timings
@@ -96,7 +94,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# the server prints this once it has opened its location file
+# the server prints this once it is ready for clients
 deadline=$((SECONDS + SERVER_WAIT))
 until grep -q 'Server instance successfully started' "$SERVER_LOG"; do
     if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -121,10 +119,10 @@ TIMER='now() { if [[ -n ${EPOCHREALTIME:-} ]]; then echo "${EPOCHREALTIME/./}"; 
 s=$(now); rc=0; "${@:2}" || rc=$?; printf "%s %s\n" "$s" "$(now)" >"$1"; exit "$rc"'
 
 pids=()
-launch() { # app binary args...: one application, in the background
-    local app=$1
-    shift
-    bash -c "$TIMER" timer "$TIMES/${#pids[@]}_$app" \
+launch() { # app-index app binary args...: one application, in the background
+    local index=$1 app=$2
+    shift 2
+    bash -c "$TIMER" timer "$TIMES/${index}_$app" \
         /usr/bin/env CAPIO_DIR="$CAPIO_DIR" CAPIO_WORKFLOW_NAME=CAPIO CAPIO_APP_NAME="$app" \
         LD_PRELOAD="${EXTRA_PRELOAD:+$EXTRA_PRELOAD:}$CAPIO_PRELOAD" "$@" &
     pids+=("$!")
@@ -132,67 +130,31 @@ launch() { # app binary args...: one application, in the background
 
 common=(--window "$WINDOW_SIZE" --size "$FILE_SIZE" --count "$FILE_COUNT" --compute "$COMPUTE")
 
-# A downstream stage starts only once its input is registered: the server lists each new
-# file in files_location_<node>.txt (in CAPIO_DIR). Waiting here overlaps the upstream
-# stage's run, so it is not added to the measured time, which starts with the first binary.
-registered() { # name-format: whether the server listed file 0 of it
-    local name
-    # shellcheck disable=SC2059 # the format is the benchmark's own %d file-name format
-    name=$(printf "$1" 0)
-    grep -qsF -- "/$name " "$CAPIO_DIR"/files_location_*.txt
-}
-
-wait_registered() { # name-format...: until the server listed all of them
-    local format waited_us since_us
-    since_us=$(now_us)
-    local deadline=$((SECONDS + ${REGISTER_WAIT:-10}))
-    for format; do
-        until registered "$format"; do
-            if ((SECONDS >= deadline)); then
-                printf '  warning: %s not registered after %ss; starting anyway\n' \
-                    "$format" "${REGISTER_WAIT:-10}" >&2
-                return 0
-            fi
-            sleep 0.002
-        done
-    done
-    waited_us=$((10#$(now_us) - 10#$since_us))
-    printf '  inputs registered after %d.%03d ms\n' "$((waited_us / 1000))" "$((waited_us % 1000))"
-}
-
 start_us=$(now_us)
 
-# Upstream stages first; each downstream stage once its inputs are registered (see above).
+# Last stage first: a reader that opens its file before it exists waits for CAPIO to find it.
 case "$TOPOLOGY" in
 chain)
-    launch producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
-    wait_registered "$OUTPUT_FILE_FORMAT"
-    launch consumer "$BUILD_DIR/consumer" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
+    launch 1 consumer "$BUILD_DIR/consumer" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
+    launch 0 producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
     ;;
 pipeline)
-    launch producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "p0_%d.dat"
-    wait_registered "p0_%d.dat"
-    launch prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" "${common[@]}" --input "p0_%d.dat" --output "p1_%d.dat"
-    wait_registered "p1_%d.dat"
-    launch consumer "$BUILD_DIR/consumer" "${common[@]}" --output "p1_%d.dat"
+    launch 2 consumer "$BUILD_DIR/consumer" "${common[@]}" --output "p1_%d.dat"
+    launch 1 prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" "${common[@]}" --input "p0_%d.dat" --output "p1_%d.dat"
+    launch 0 producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "p0_%d.dat"
     ;;
 broadcast)
-    launch producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
-    wait_registered "$OUTPUT_FILE_FORMAT"
-    for ((k = 0; k < N; k++)); do
-        launch consumer "$BUILD_DIR/consumer" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
+    for ((k = N - 1; k >= 0; k--)); do
+        launch $((k + 1)) consumer "$BUILD_DIR/consumer" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
     done
+    launch 0 producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "$OUTPUT_FILE_FORMAT"
     ;;
 fanin)
-    launch producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "p0_%d.dat"
-    wait_registered "p0_%d.dat"
-    for ((k = 0; k < N; k++)); do
-        launch prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" "${common[@]}" --input "p0_%d.dat" --output "mid_${k}_%d.dat"
+    launch $((N + 1)) consumer "$BUILD_DIR/consumer" "${common[@]}" --modules "$N" --output "mid_%d_%d.dat"
+    for ((k = N - 1; k >= 0; k--)); do
+        launch $((k + 1)) prodcons "$BUILD_DIR/prodcons" --pattern "$PATTERN" "${common[@]}" --input "p0_%d.dat" --output "mid_${k}_%d.dat"
     done
-    for ((k = 0; k < N; k++)); do
-        wait_registered "mid_${k}_%d.dat"
-    done
-    launch consumer "$BUILD_DIR/consumer" "${common[@]}" --modules "$N" --output "mid_%d_%d.dat"
+    launch 0 producer "$BUILD_DIR/producer" --pattern "$PATTERN" "${common[@]}" --output "p0_%d.dat"
     ;;
 esac
 
@@ -217,5 +179,5 @@ for f in "$TIMES"/*; do
         $(((s - first) / 1000)) $(((s - first) % 1000)) $(((e - s) / 1000)) $(((e - s) % 1000)) \
         $(((e - first) / 1000)) $(((e - first) % 1000))
 done
-printf 'Wall time including the registration waits: %d.%03d ms\n' "$((wall_us / 1000))" "$((wall_us % 1000))"
+printf 'Wall time from the first launch: %d.%03d ms\n' "$((wall_us / 1000))" "$((wall_us % 1000))"
 printf 'End-to-end execution time: %d.%03d ms\n' "$((elapsed_us / 1000))" "$((elapsed_us % 1000))"
