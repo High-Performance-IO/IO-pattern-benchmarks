@@ -125,3 +125,20 @@ EXTRA_PRELOAD=/path/libfoo.so ./launch.sh
 ```sh
 EXTRA_PRELOAD=a.so:b.so ./launch.sh
 ```
+## io_uring binaries
+
+When liburing is installed, two more executables are built:
+
+- **`producer_uring`** — `producer`, with the writes done through io_uring.
+- **`consumer_uring`** — `consumer`, with the reads done through io_uring.
+
+They take the same options and print the same lines as `producer` and `consumer`, so either one can replace its counterpart in a run. Each I/O is one io_uring request of `--window` bytes with an explicit offset, submitted and waited for before the next one (`src/uring_io.h`).
+
+The launch scripts do not use them yet. A chain by hand:
+
+```sh
+./build/producer_uring --size 1048576 --window 4096
+./build/consumer_uring --size 1048576 --window 4096
+```
+
+Under CAPIO they need `INTERCEPT_ALL_OBJS=1` next to `LD_PRELOAD`: liburing makes the io_uring system calls itself, not through libc, and without this setting CAPIO does not see them.
