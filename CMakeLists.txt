@@ -18,3 +18,19 @@ add_executable(prodcons src/prodcons.cpp)
 
 
 
+
+#####################################
+# io_uring targets (built only when liburing is installed)
+#####################################
+find_package(PkgConfig)
+if (PkgConfig_FOUND)
+    pkg_check_modules(LIBURING IMPORTED_TARGET liburing)
+endif ()
+if (LIBURING_FOUND)
+    add_executable(producer_uring src/producer_uring.cpp)
+    add_executable(consumer_uring src/consumer_uring.cpp)
+    target_link_libraries(producer_uring PRIVATE PkgConfig::LIBURING)
+    target_link_libraries(consumer_uring PRIVATE PkgConfig::LIBURING)
+else ()
+    message(STATUS "liburing not found: producer_uring and consumer_uring are not built")
+endif ()
